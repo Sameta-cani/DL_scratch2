@@ -94,3 +94,207 @@ class Affine:
         self.grads[0][...] = dW
         self.grads[1][...] = db
         return dx
+    
+
+class Sotfmax:
+    def __init__(self):
+        """
+        Initializes a Softmax object.
+        """
+        self.params, self.grads = [], []
+        self.out = None
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """
+        Performs the forward pass of Softmax.
+
+        Args:
+            x (numpy.ndarray): Input data on which Softmax is applied.
+
+        Returns:
+            numpy.ndarray: Result of applying Softmax to the input data.
+        """
+        self.out = softmax(x)
+        return self.out
+    
+    def backward(self, dout: np.ndarray) -> np.ndarray:
+        """
+        Performs the backward pass of Softmax.
+
+        Args:
+            dout (numpy.ndarray): Gradient propagated from the next layer.
+
+        Returns:
+            numpy.ndarray: Gradient with respect to the input data.
+        """
+        dx = self.out * dout
+        sumdx = np.sum(dx, axis=1, keepdims=True)
+        dx -= self.out * sumdx
+        return dx
+    
+class SoftmaxWithLoss:
+    def __init__(self):
+        """
+        Initializes SoftmaxWithLoss object.
+        """
+        self.parmas, self.grads = [], []
+        self.y = None
+        self.t = None
+
+    def forward(self, x: np.ndarray, t: np.ndarray) -> float:
+        """
+        Performs the forward pass, calculating Softmax and Cross-Entropy loss.
+
+        Args:
+            x (numpy.ndarray): Input data.
+            t (numpy.ndarray): Target labels for the input data.
+
+        Returns:
+            float: Cross-Entropy loss.
+        """
+        self.t = t
+        self.y = softmax(x)
+
+        # If the labels are one-hot encoded, convert to class indices
+        if self.t.size == self.y.size:
+            self.t = self.t.argmax(axis=1)
+
+        loss = cross_entropy_error(self.y, self.t)
+        return loss
+    
+    def backward(self, dout: float=1) -> np.ndarray:
+        """
+        Performs the backward pass, calculating gradients with respect to the input.
+
+        Args:
+            dout (float, optional): Gradient of the loss. Defaults to 1.
+
+        Returns:
+            numpy.ndarray: Gradient with respect to the input data.
+        """
+        batch_size = len(self.t)
+
+        dx = self.y.copy()
+        dx[np.arange(batch_size), self.t] -= 1
+        dx *= dout
+        dx /= batch_size
+
+        return dx
+
+class Sigmoid:
+    def __init__(self):
+        """
+        Initializes a Sigmoid object.
+        """
+        self.params, self.grads = [], []
+        self.out = None
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """
+        Performs the forward pass, applying the Sigmoid activation function.
+
+        Args:
+            x (numpy.ndarray): Input data.
+
+        Returns:
+            numpy.ndarray: Output of the Sigmoid function.
+        """
+        self.out = 1 / (1 + np.exp(-x))
+        return self.out
+    
+    def backward(self, dout: np.ndarray) -> np.ndarray:
+        """
+        Performs the backward pass, calculating the gradient with respect to the input.
+
+        Args:
+            dout (numpy.ndarray): Gradient of the loss.
+
+        Returns:
+            numpy.ndarray: Gradient with respect to the input data.
+        """
+        dx = dout * (1.0 - self.out) * self.out
+        return dx
+    
+class SigmoidWithLoss:
+    def __init__(self):
+        """
+        Initializes a SigmoidWithLoss object.
+        """
+        self.params, self.grads = [], []
+        self.loss = None
+        self.y = None
+        self.t = None
+
+    def forward(self, x: np.ndarray, t: np.ndarray) -> float:
+        """
+        Performs the forward pass, applying the Sigmoid activation and calculating Cross-Entropy loss.
+
+        Args:
+            x (numpy.ndarray): Input data.
+            t (numpy.ndarray): Target labels for the input data.
+
+        Returns:
+            float: Cross-Entropy loss.
+        """
+        self.t = t
+        self.y = 1 / (1 + np.exp(-x))
+
+        self.loss = cross_entropy_error(np.c_[1 - self.y, self.y], self.t)
+
+        return self.loss
+    
+    def backward(self, dout: float=1) -> np.ndarray:
+        """
+        Performs the backward pass, calculating gradients with respect to the input.
+
+        Args:
+            dout (float, optional): Gradient of the loss. Defaults to 1.
+
+        Returns:
+            numpy.ndarray: Gradient with respect to the input data.
+        """
+        batch_size = len(self.t)
+
+        dx = (self.y - self.t) * dout / batch_size
+        return dx
+    
+class Dropout:
+    def __init__(self, dropout_ratio: float=0.5):
+        """
+        Initializes a Dropout layer.
+
+        Args:
+            dropout_ratio (float, optional): Probability of dropping out a neuron. Defaults to 0.5.
+        """
+        self.params, self.grads = [], []
+        self.dropout_ratio = dropout_ratio
+        self.mask = None
+    
+    def forward(self, x: np.ndarray, train_flg: bool=True) -> np.ndarray:
+        """
+        Performs the forward pass applying dropout during training.
+
+        Args:
+            x (numpy.ndarray): Input data.
+            train_flg (bool, optional): Flag indicating whether the model is training mode. Defaults to True.
+
+        Returns:
+            np.ndarray: _description_
+        """
+        if train_flg:
+            self.mask = (np.random.rand(*x.shape) > self.dropout_ratio) / (1.0 - self.dropout_ratio)
+            return x * self.mask
+        else:
+            return x
+    
+    def backward(self, dout: np.ndarray) -> np.ndarray:
+        """
+        Performs the backward pass, applying the dropout mask to the gradient.
+
+        Args:
+            dout (numpy.ndarray): Gradient of the loss.
+
+        Returns:
+            numpy.ndarray: Gradient with respect to the input data.
+        """
+        return dout * self.mask
