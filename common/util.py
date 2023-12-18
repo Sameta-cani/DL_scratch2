@@ -168,3 +168,24 @@ def ppmi(C: np.ndarray, verbose: bool=False, eps: float=1e-8) -> np.ndarray:
                 if cnt % (total//100 + 1) == 0:
                     print('%.1f%% 완료' % (100*cnt/total))
     return M
+
+
+import numpy as np
+
+def create_contexts_target(corpus, window_size=1):
+    """
+    Create context-target pairs from a given corpus for word embeddings.
+
+    Parameters:
+    - corpus (numpy.ndarray): Array representing the input corpus as a sequence of word indices.
+    - window_size (int): Size of the context window on each side of the target word. Default is 1.
+
+    Returns:
+    - contexts (numpy.ndarray): Array where each row represents the context words for a target word.
+    - target (numpy.ndarray): Array representing the target words corresponding to each row in the contexts array.
+    """
+    target = corpus[window_size:-window_size]
+    contexts = np.array([list(corpus[i - window_size:i]) + list(corpus[i + 1:i + window_size + 1])
+                         for i in range(window_size, len(corpus) - window_size)])
+
+    return contexts, np.array(target)
