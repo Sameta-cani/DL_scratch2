@@ -92,6 +92,43 @@ def most_similar(query: str, word_to_id: dict, id_to_word: dict, word_matrix: np
             return
 
 
+def convert_one_hot(corpus: np.ndarray, vocab_size: int) -> np.ndarray:
+    """
+    Convert a given corpus into one-hot encoded representation.
+
+    Parameters:
+    - corpus (numpy.ndarray): Input corpus to be converted.
+        If `corpus` is 1-dimensional, it is treated as a collection of word indices.
+        If `corpus` is 2-dimensional, each row represents a sequence of word indices.
+    - vocab_size (int): Size of the vocabulary, determining the dimensionality of the one-hot encoding.
+
+    Returns:
+    - numpy.ndarray: One-hot encoded representation of the input corpus.
+        If the input is 1-dimensional, the output will be a 2-dimensional array.
+        If the input is 2-dimensional, the output will be a 3-dimensional array.
+
+    Note:
+    The function uses NumPy's eye function for vectorized one-hot encoding without explicit loops.
+
+    Example:
+    ```python
+    corpus_1d = np.array([0, 2, 1])
+    result_1d = convert_one_hot(corpus_1d, vocab_size=4)
+    print(result_1d)
+    # Output: [[1 0 0 0]
+    #          [0 0 1 0]
+    #          [0 1 0 0]]
+
+    corpus_2d = np.array([[0, 2], [1, 3]])
+    result_2d = convert_one_hot(corpus_2d, vocab_size=4)
+    print(result_2d)
+    # Output: [[[1 0 0 0] [0 0 1 0]]
+    #          [[0 1 0 0] [0 0 0 1]]]
+    """
+    one_hot = np.eye(vocab_size, dtype=np.int32)[corpus]
+
+    return one_hot
+
 
 def create_co_matrix(corpus: np.ndarray, vocab_size: int, window_size: int=1) -> np.ndarray:
     """
