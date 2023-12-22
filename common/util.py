@@ -159,6 +159,47 @@ def create_co_matrix(corpus: np.ndarray, vocab_size: int, window_size: int=1) ->
     return co_matrix
 
 
+def to_cpu(x):
+    """
+    Transfers a given array to the CPU memory.
+
+    This function is designed to handle arrays that are either already in NumPy format
+    or in a different format (like those used in GPU computations). If the array is not
+    in NumPy format, it converts it to a NumPy array.
+
+    Args:
+        x: The array to be transferred to CPU memory. Can be a NumPy array or an array in another format.
+
+    Returns:
+        numpy.ndarray: The array in NumPy format, ensuring it is in the CPU memory.
+    """
+    import numpy
+    if type(x) == numpy.ndarray:
+        return x
+    return np.asnumpy(x)
+
+
+def to_gpu(x):
+    """
+    Transfers a given array to GPU memory.
+
+    This function is designed to handle arrays that are either already in CuPy format
+    (a library for array operations equivalent to NumPy but on NVIDIA GPUs) or in NumPy format.
+    If the array is in NumPy format, it converts it to CuPy format, facilitating GPU-accelerated operations.
+
+    Args:
+        x: The array to be transferred to GPU memory. Can be a CuPy array or a NumPy array.
+
+    Returns:
+        cupy.ndarray: The array in CuPy format, ensuring it is in GPU memory.
+    """
+    import cupy
+    if type(x) == cupy.ndarray:
+        return x
+    return cupy.asarray(x)
+
+
+
 def clip_grads(grads: list, max_norm: float) -> None:
     """
     Clip gradients to prevent the exploding gradient problem.
@@ -226,3 +267,80 @@ def create_contexts_target(corpus, window_size=1):
                          for i in range(window_size, len(corpus) - window_size)])
 
     return contexts, np.array(target)
+
+def analogy(a: str, b: str, c: str, word_to_id: dict, id_to_word: dict, word_matrix: np.ndarray, top: int=5, answer: str=None):
+    """
+    Solves word analogies using word vectors.
+
+    Given three words, a, b, and c, the function finds words that complete the analogy 
+    'a is to b as c is to ?'. It computes this by finding the word whose vector representation 
+    is closest to the vector 'b - a + c' in terms of cosine similarity.
+
+    Args:
+        a (str): First word in the analogy (word a).
+        b (str): Second word in the analogy (word b).
+        c (str): Third word in the analogy (word c).
+        word_to_id (dict): A dictionary mapping words to their respective indices in the word matrix.
+        id_to_word (dict): A dictionary mapping indices in the word matrix to their respective words.
+        word_matrix (numpy.ndarray): A matrix where each row represents a word vector.
+        top (int, optional): The number of top similar words to return. Defaults to 5.
+        answer (str, optional): The expected answer word, if known. Defaults to None.
+
+    Prints:
+        The function prints the analogy, the expected answer (if provided), and the top similar words
+        from the word matrix that complete the analogy.
+        
+    Note:
+        If any of the words a, b, or c are not in the word_to_id dictionary, the function prints an
+        error message and returns without performing the analogy.
+    """
+    for word in (a, b, c):
+        if word not in word_to_id:
+            print('%s(을)를 찾을 수 없습니다.' % word)
+            return
+        
+    print('\n[analogy] ' + a + ':' + b + ' = ' + c + ':?')
+    a_vec, b_vec, c_vec = word_matrix[word_to_id[a]], word_matrix[word_to_id[b]], word_matrix[word_to_id[c]]
+    query_vec = b_vec - a_vec + c_vec
+    query_vec = normalize(query_vec)
+
+    similarity = np.dot(word_matrix, query_vec)
+
+    if answer is not None:
+        print("==>" + answer + ":" + str(np.dot(word_matrix[word_to_id[answer]], query_vec)))
+
+    count = 0
+    for i in (-1 * similarity).argsort():
+        if np.isnan(similarity[i]):
+            continue
+        if id_to_word[i] in (a, b, c):
+            continue
+        print(' {0}: {1}'.format(id_to_word[i], similarity[i]))
+
+        count += 1
+        if count >= top:
+            return
+
+    
+def normalize(x: np.ndarray) -> np.ndarray:
+    """
+    Normalizes a given NumPy array.
+
+    This function normalizes a NumPy array either in one-dimensional (1D) or two-dimensional (2D) form.
+    For a 2D array, each row is treated as a separate vector and is normalized independently.
+    For a 1D array, it is treated as a single vector for normalization.
+    Normalization is performed by dividing each element by the Euclidean norm (sqrt of the sum of squares) of the vector.
+
+    Args:
+        x (numpy.ndarray): A NumPy array to be normalized. Can be either 1D or 2D.
+
+    Returns:
+        numpy.ndarray: The normalized array with the same shape as the input.
+    """
+    if x.ndim == 2:
+        s = np.sqrt((x * x).sum(axis=1))
+        x /= s.reshape((s.shape[0], 1))
+    elif x.ndim == 1:
+        s = np.sqrt((x * x).sum())
+        x /= s
+    return x

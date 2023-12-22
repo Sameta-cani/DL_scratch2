@@ -298,3 +298,59 @@ class Dropout:
             numpy.ndarray: Gradient with respect to the input data.
         """
         return dout * self.mask
+    
+class Embedding:
+    """
+    A class for managing word embeddings in a nerual network.
+
+    This class handles the retrieval of word embeddings based on index and computes gradients for backpropagation in a nerual network.
+
+    Args:
+        params (list): A list containing the embedding matrix.
+        grads (list): A list containing gradeints of the embedding matrix.
+        idx (list, int): Indices of the last retrieved word embeddings.
+
+    Methods:
+        forward(idx): Retrieves the embedding vectors for the given indeices.
+        backward(dout): Computes and accumulates the gradients for the embedding matrix.
+    """
+    def __init__(self, W: np.ndarray):
+        """
+        Initializes the Embedding object with an embedding matrix.
+
+        Args:
+            W (numpy.ndarray): The embedding matrix.
+        """
+        self.params = [W]
+        self.grads = [np.zeros_like(W)]
+        self.idx = None
+
+    def forward(self, idx: np.ndarray) -> np.ndarray:
+        """
+        Performs the forward pass by retrieving the embedding vectors for the given indices.
+
+        Args:
+            idx (numpy.ndarray): An array of indices for which embeddings are to be retrieved.
+
+        Returns:
+            numpy.ndarray: The embedding vectors corresponding to the given indices.
+        """
+        W, = self.params
+        self.idx = idx
+        out = W[idx]
+        return out
+    
+    def backward(self, dout: np.ndarray) -> None:
+        """
+        Performs the backward pass by computing and accumulating the gradients for the embedding matrix.
+
+        Args:
+            dout (numpy.ndarray): The gradient of the loss with respect to the output of forward pass.
+
+        Returns:
+            None
+        """
+        dW, = self.grads
+        dW[...] = 0
+        np.add.at(dW, self.idx, dout)
+        return None
