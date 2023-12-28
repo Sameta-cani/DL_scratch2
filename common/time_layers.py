@@ -1,3 +1,5 @@
+import sys
+sys.path.append('..')
 from common.np import *
 from common.layers import *
 from common.functions import sigmoid
@@ -184,6 +186,218 @@ class TimeRNN:
         Reset the hidden state of the RNN to None.
         """
         self.h = None
+
+
+class LSTM:
+    """
+    Long Short-Term Memory (LSTM) layer.
+
+    LSTM is a type of recurrent neural network (RNN) layer that is capable of learning long-term dependencies.
+
+    Attributes:
+        params (list of numpy.ndarray): Parameters of the LSTM layer, including weight matrices and bias vector.
+        grads (list of numpy.ndarray): Gradients of the LSTM layer's parameters.
+        cache (tuple): Cached data from the forward pass for use in the backward pass.
+    """
+
+    def __init__(self, Wx: np.ndarray, Wh: np.ndarray, b: np.ndarray):
+        """
+        Initializes the LSTM layer.
+
+        Args:
+            Wx (numpy.ndarray): Weight matrix for the input x.
+            Wh (numpy.ndarray): Weight matrix for the hidden state.
+            b (numpy.ndarray): Bias vector.
+        """
+        self.params = [Wx, Wh, b]
+        self.grads = [np.zeros_like(Wx), np.zeros_like(Wh), np.zeros_like(b)]
+        self.cache = None
+
+    def forward(self, x: np.ndarray, h_prev: np.ndarray, c_prev: np.ndarray) -> tuple:
+        """
+        Forward pass for the LSTM layer.
+
+        Args:
+            x (numpy.ndarray): Input data.
+            h_prev (numpy.ndarray): Previous hidden state.
+            c_prev (numpy.ndarray): Previous cell state.
+
+        Returns:
+            tuple:
+                numpy.ndarray: Next hidden state.
+                numpy.ndarray: Next cell state.
+        """
+        Wx, Wh, b = self.params
+        A = np.dot(x, Wx) + np.dot(h_prev, Wh) + b
+
+        # 분할하여 게이트에 적용
+        H = h_prev.shape[1]
+        f = sigmoid(A[:, :H])
+        g = np.tanh(A[:, H:2*H])
+        i = sigmoid(A[:, 2*H:3*H])
+        o = sigmoid(A[:, 3*H:])
+
+        # 새로운 셀 상태
+        c_next = f * c_prev + g * i
+        h_next = o * np.tanh(c_next)
+
+        self.cache = (x, h_prev, c_prev, i, f, g, o, c_next)
+        return h_next, c_next
+    
+    def backward(self, dh_next: np.ndarray, dc_next: np.ndarray) -> tuple:
+        """
+        Backward pass for the LSTM layer.
+
+        Args:
+            dh_next (numpy.ndarray): Gradient of loss with respect to the next hidden state.
+            dc_next (numpy.ndarray): Gradient of loss with respect to the next cell state.
+
+        Returns:
+            tuple: 
+                numpy.ndarray: Gradient with respect to the input data.
+                numpy.ndarray: Gradient with respect to the previous hidden state.
+                numpy.ndarray: Gradient with respect to the previous cell state.
+        """
+        Wx, Wh, b = self.params
+        x, h_prev, c_prev, i, f, g, o, c_next = self.cache
+
+        tanh_c_next = np.tanh(c_next)
+        ds = dc_next + (dh_next * o) * (1 - tanh_c_next ** 2)
+
+        # 게이트 그래디언트
+        dc_prev = ds * f
+        di = ds * g * i * (1 - i)
+        df = ds * c_prev * f * (1 - f)
+        do = dh_next * tanh_c_next * o * (1 - o)
+        dg = ds * i * (1 - g ** 2)
+
+        # 중간 그래디언트
+        dA = np.hstack((df, dg, di, do))
+
+        # 파라미터 그래디언트
+        dWh = np.dot(h_prev.T, dA)
+        dWx = np.dot(x.T, dA)
+        db = dA.sum(axis=0)
+
+        self.grads[0][...] = dWx
+        self.grads[1][...] = dWh
+        self.grads[2][...] = db
+
+        # 입력 및 이전 은닉 상태 그래디언트
+        dx = np.dot(dA, Wx.T)
+        dh_prev = np.dot(dA, Wh.T)
+
+        return dx, dh_prev, dc_prev
+    
+
+class TimeLSTM:
+    """
+    Time-distributed LSTM layer for sequence data processing.
+
+    This layer applies an LSTM operation over sequences of time steps, allowing it to capture
+    temporal dependencies in sequence data.
+
+    Attributes:
+        params (list): Parameters of the LSTM layer.
+        grads (list): Gradients of the LSTM layer's parameters.
+        layers (list): List of LSTM layers for each time step.
+        h (np.ndarray): Hidden state.
+        c (np.ndarray): Cell state.
+        dh (np.ndarray): Gradient of the hidden state.
+        stateful (bool): If True, the layer retains state between batches.
+    """
+
+    def __init__(self, Wx: np.ndarray, Wh: np.ndarray, b: np.ndarray, stateful: bool=False):
+        """
+        Initializes the TimeLSTM layer.
+
+        Args:
+            Wx (np.ndarray): Input-to-hidden weight matrix.
+            Wh (np.ndarray): Hidden-to-hidden weight matrix.
+            b (np.ndarray): Bias vector.
+            stateful (bool, optional): If True, the layer maintains state between forward passes. Defaults to False.
+        """
+        self.params = [Wx, Wh, b]
+        self.grads = [np.zeros_like(Wx), np.zeros_like(Wh), np.zeros_like(b)]
+        self.layers = []
+        self.h, self.c = None, None
+        self.dh = None
+        self.stateful = stateful
+
+    def forward(self, xs: np.ndarray) -> np.ndarray:
+        """
+        Forward pass for processing a batch of sequences.
+
+        Args:
+            xs (np.ndarray): Input sequences, shaped as (batch_size, sequence_length, feature_size).
+
+        Returns:
+            np.ndarray: Output sequences.
+        """
+        Wx, Wh, b = self.params
+        N, T, D = xs.shape
+        H = Wh.shape[0]
+
+        # Initialize the hidden and cell states if not stateful
+        if not self.stateful or self.h is None:
+            self.h = np.zeros((N, H), dtype='f')
+        if not self.stateful or self.c is None:
+            self.c = np.zeros((N, H), dtype='f')
+
+        hs = np.empty((N, T, H), dtype='f')
+        if not self.layers:
+            self.layers = [LSTM(*self.params) for _ in range(T)]
+
+        for t in range(T):
+            self.h, self.c = self.layers[t].forward(xs[:, t, :], self.h, self.c)
+            hs[:, t, :] = self.h
+
+        return hs
+    
+    def backward(self, dhs: np.ndarray) -> np.ndarray:
+        """
+        Backward pass for processing gradients through the time-distributed LSTM layer.
+
+        Args:
+            dhs (np.ndarray): Gradients w.r.t the output of the LSTM layer.
+
+        Returns:
+            np.ndarray: Gradients w.r.t the input sequences.
+        """
+        Wx, Wh, b = self.params
+        N, T, H = dhs.shape
+        D = Wx.shape[0]
+
+        dxs = np.empty((N, T, D), dtype='f')
+        dh, dc = 0, 0
+
+        grads = [0, 0, 0]
+        for t in reversed(range(T)):
+            dx, dh, dc = self.layers[t].backward(dhs[:, t, :] + dh, dc)
+            dxs[:, t, :] = dx
+            for i, grad in enumerate(self.layers[t].grads):
+                grads[i] += grad
+
+        for i, grad in enumerate(grads):
+            self.grads[i][...] = grad
+        self.dh = dh
+        return dxs
+    
+    def set_state(self, h: np.ndarray, c: np.ndarray=None):
+        """
+        Sets the hidden and cell states of the LSTM layer.
+
+        Args:
+            h (np.ndarray): Hidden state to set.
+            c (np.ndarray, optional): Cell state to set. If None, only the hidden state is set. Defaults to None.
+        """
+        self.h, self.c = h, c
+
+    def reset_state(self):
+        """
+        Resets the hidden and cell states of the LSTM layer.
+        """
+        self.h, self.c = None, None
 
 
 class TimeEmbedding:
