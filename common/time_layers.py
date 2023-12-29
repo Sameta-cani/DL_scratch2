@@ -616,3 +616,245 @@ class TimeSoftmaxWithLoss:
         dx *= mask_reshaped[:, np.newaxis]
 
         return dx.reshape(N, T, V)
+    
+
+class TimeDropout:
+    """
+    Time-distributed dropout layer.
+
+    This layer applies dropout to the input data along the time axis. Drooput randomly sets
+    a fraction of input units to 0 at each update during training time, which helps prevent overfitting.
+
+    Attributes:
+        dropout_ratio (float): Dropout ratio.
+        mask (np.ndarray): Dropout mask.
+        train_flg (bool): Flag indicating whether the layer is in training mode or not.
+    """
+
+    def __init__(self, dropout_ratio: float=0.5):
+        """
+        Initializes the TimeDropout layer.
+
+        Args:
+            dropout_ratio (float, optional): Dropout ratio. Defaults to 0.5.
+        """
+        self.params, self.grads = [], []
+        self.dropout_ratio = dropout_ratio
+        self.mask = None
+        self.train_flg = True
+
+    def forward(self, xs: np.ndarray) -> np.ndarray:
+        """
+        Forward pass for the TimeDropout layer.
+
+        Args:
+            xs (np.ndarray): Input data.
+
+        Returns:
+            np.ndarray: Output data after applying dropout.
+        """
+        if self.train_flg:
+            self.mask = np.random.randn(*xs.shape) > self.dropout_ratio
+            return xs * self.mask
+        else:
+            return xs
+        
+    def backward(self, dout: np.ndarray) -> np.ndarray:
+        """
+        Backward pass for the TimeDropout layer.
+
+        Args:
+            dout (np.ndarray): Upstream gradients.
+
+        Returns:
+            np.ndarray: Downstream gradients.
+        """
+        return dout * self.mask
+    
+
+class GRU:
+    """
+    Gated Recurrent Unit (GRU) layer.
+
+    GRU is a type of recurrent neural network layer that uses gating mechanisms to control
+    the flow of information.
+
+    Attributes:
+        Wx (np.ndarray): Input-to-hidden weight matrix.
+        Wh (np.ndarray): Hidden-to-hidden weight matrix.
+        dWx (np.ndarray): Gradient of Wx.
+        dWh (np.ndarray): Gradient of Wh.
+        cache (tuple): Cached values for use in backward pass.
+    """
+
+    def __init__(self, Wx, Wh):
+        self.Wx, self.Wh = Wx, Wh
+        self.dWx, self.dWh = None, None
+        self.cache = None
+
+    def forward(self, x: np.ndarray, h_prev: np.ndarray) -> np.ndarray:
+        """
+        Forward pass for the GRU layer.
+
+        Args:
+            x (np.ndarray): Input data.
+            h_prev (np.ndarray): Previous hidden state.
+
+        Returns:
+            np.ndarray: Next hidden state.
+        """
+        H = self.Wh.shape[0]
+        Wxz, Wxr, Wx = np.split(self.Wx, 3, axis=1)
+        Whz, Whr, Wh = np.split(self.Wh, 3, axis=1)
+
+        z = sigmoid(np.dot(x, Wxz) + np.dot(h_prev, Whz))
+        r = sigmoid(np.dot(x, Wxr) + np.dot(h_prev, Whr))
+        h_hat = np.tanh(np.dot(x, Wx) + np.dot(r * h_prev, Wh))
+        h_next = (1 - z) * h_prev + z * h_hat
+
+        self.cache = (x, h_prev, z, r, h_hat)
+        return h_next
+    
+    def backward(self, dh_next: np.ndarray) -> tuple:
+        """
+        Backward pass for the GRU layer.
+
+        Args:
+            dh_next (np.ndarray): Gradient of the loss with respect to the next hidden state.
+
+        Returns:
+            tuple:
+                np.ndarray: Gradient with respect to the input data.
+                np.ndarray: Gradient with respect to the previous hidden state.
+        """
+        H = self.W.shape[0]
+        Wxz, Wxr, Wx = np.split(self.Wx, 3, axis=1)
+        Whz, Whr, Wh = np.split(self.Wh, 3, axis=1)
+        x, h_prev, z, r, h_hat = self.cache
+
+        dh_hat = dh_next * z
+        dh_prev = dh_next * (1 - z)
+
+        # tanh
+        dt = dh_hat * (1 - h_hat ** 2)
+        dWh = np.dot((r * h_prev).T, dt)
+        dhr = np.dot(dt, Wh.T)
+        dWx = np.dot(x.T, dt)
+        dx = np.dot(dt, Wx.T)
+        dh_prev += r * dhr
+
+        # update gate(z)
+        dz = dh_next * h_hat - dh_next * h_prev
+        dt = dz * z * (1 - z)
+        dWhz = np.dot(h_prev.T, dt)
+        dh_prev += np.dot(dt, Whz.T)
+        dWxz = np.dot(x.T, dt)
+        dx += np.dot(dt, Wxz.T)
+
+        # rest gate(r)
+        dr = dhr * h_prev
+        dt = dr * r * (1 - r)
+        dWhr = np.dot(h_prev.T, dt)
+        dh_prev += np.dot(dt, Whr.T)
+        dWxr = np.dot(x.T, dt)
+        dx += np.dot(dt, Wxr.T)
+
+        self.dWx = np.hstack((dWxz, dWxr, dWx))
+        self.dWh = np.hstack((dWhz, dWhr, dWh))
+
+        return dx, dh_prev
+    
+
+class TimeGRU:
+    """
+    Time-distributed GRU layer.
+
+    This layer applies a GRU operation over sequences of time steps, allowing it to capture
+    temporal dependencies in sequence data. It can maintain state across batches if stateful.
+
+    Attributes:
+        Wx (np.ndarray): Input-to-hidden weight matrix.
+        Wh (np.ndarray): Hidden-to-hidden weight matrix.
+        stateful (bool): If True, maintains state across batches.
+        h (np.ndarray): Hidden state.
+        dWx (np.ndarray): Gradient of Wx.
+        dWh (np.ndarray): Gradient of Wh.
+    """
+
+    def __init__(self, Wx: np.ndarray, Wh: np.ndarray, stateful: bool=False):
+        """
+        Initializes the TimeGRU layer.
+
+        Args:
+            Wx (np.ndarray): Input-to-hidden weight matrix.
+            Wh (np.ndarray): Hidden-to-hidden weight matrix.
+            stateful (bool, optional): If True, the layer maintains state between forward passes. Defaults to False.
+        """
+        self.Wx, self.Wh = Wx, Wh
+        self.stateful = stateful
+        self.h = None
+        self.dWx, self.dWh = None, None
+        self.gru_layer = GRU(Wx, Wh) # Reusing a single GRU layer
+
+    def forward(self, xs: np.ndarray) -> np.ndarray:
+        """
+        Forward pass for processing a batch of sequences.
+
+        Args:
+            xs (np.ndarray): Input sequences, shaped as (batch_size, sequence_length, feature_size).
+
+        Returns:
+            np.ndarray: Output sequences.
+        """
+        N, T, D = xs.shape
+        H = self.Wh.shape[0]
+
+        if not self.stateful or self.h is None:
+            self.h = np.zeros((N, H), dtype='f')
+
+        hs = np.empty((N, T, H), dtype='f')
+        for t in range(T):
+            self.h = self.gru_layer.forward(xs[:, t, :], self.h)
+            hs[:, t, :] = self.h
+
+        return hs
+    
+    def backward(self, dhs: np.ndarray) -> np.ndarray:
+        """
+        Backward pass for processing gradients through the time-distributed GRU layer.
+
+        Args:
+            dhs (np.ndarray): Gradients w.r.t the output of the GRU layer.
+
+        Returns:
+            np.ndarray: Gradients w.r.t the input sequences.
+        """
+        N, T, H = dhs.shape
+        D = self.Wx.shape[0]
+
+        dxs = np.empty((N, T, D), dtype='f')
+        dh = 0
+        self.dWx, self.dWh = 0, 0
+
+        for t in reversed(range(T)):
+            dx, dh = self.gru_layer.backward(dhs[:, t, :] + dh)
+            dxs[:, t, :] = dx
+            self.dWx += self.gru_layer.dWx
+            self.dWh += self.gru_layer.dWh
+
+        return dxs
+    
+    def set_state(self, h: np.ndarray):
+        """
+        Sets the hidden state of the GRU layer.
+
+        Args:
+            h (np.ndarray): Hidden state to set.
+        """
+        self.h = h
+
+    def reset_state(self):
+        """
+        Resets the hidden state of the GRU layer.
+        """
+        self.h = None
