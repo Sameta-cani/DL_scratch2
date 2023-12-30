@@ -38,11 +38,12 @@ def softmax(x: np.ndarray) -> np.ndarray:
         numpy.ndarray: Output of the softmax activation function.
     """
     if x.ndim == 2:
-        x = np.exp(x - np.max(x, axis=1, keepdims=True))
-        x /= np.sum(x, axis=1, keepdims=True)
+        x = x - x.max(axis=1, keepdims=True)
+        x = np.exp(x)
+        x /= x.sum(axis=1, keepdims=True)
     elif x.ndim == 1:
-        x = np.exp(x - np.max(x))
-        x /= np.sum(np.exp(x))
+        x = x - np.max(x)
+        x = np.exp(x) / np.sum(np.exp(x))
 
     return x
 

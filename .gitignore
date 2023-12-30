@@ -87,6 +87,7 @@ dataset/*.npy
 dataset/*.txt
 dataset/*.pkl
 ch04/*.pkl
+ch06/*.pkl
 
 # IPython
 profile_default/

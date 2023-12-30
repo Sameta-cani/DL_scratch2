@@ -367,6 +367,60 @@ def analogy(a: str, b: str, c: str, word_to_id: dict, id_to_word: dict, word_mat
             return
 
     
+def eval_seq2seq(model, question: np.ndarray, correct: np.ndarray, id_to_char: dict,
+                 verbos: bool=False, is_reverse: bool=False):
+    """
+    Evaluate a Seq2seq model.
+
+    This function generates a response to a given question using the Seq2seq model,
+    and compares it with the correct answer. It optionally prints both the question and
+    the generated answer, along with the correct answer for visualization.
+
+    Args:
+        model (Seq2seq): The Seq2seq model to be evaluated.
+        question (np.ndarray): The input question represented as a sequence of IDs.
+        correct (np.ndarray): The correct answer represented as a sequence of IDs.
+        id_to_char (dict): A dictionary mapping ID to character.
+        verbos (bool, optional): If True, prints the question, the correct answer, and the model's answer.
+        is_reverse (bool, optional): If True, reverses the order of the question's characters before printing.
+
+    Returns:
+        int: 1 if the model's answer matches the correct answer, 0 otherwise.
+    """
+    correct = correct.flatten()
+    start_id = correct[0]
+    correct = correct[1:]
+    guess = model.generate(question, start_id, len(correct))
+
+    question = ''.join([id_to_char[int(c)] for c in question.flatten()])
+    correct = ''.join([id_to_char[int(c)] for c in correct])
+    guess = ''.join([id_to_char[int(c)] for c in guess])
+
+    if verbos:
+        if is_reverse:
+            question = question[::-1]
+
+        colors = {'ok': '\033[92m', 'fail': '\033[91m', 'close': '\033[0m'}
+        print('Q', question)
+        print('T', correct)
+
+        is_windows = os.name == 'nt'
+
+        if correct == guess:
+            mark = colors['ok'] + '☑' + colors['close']
+            if is_windows:
+                mark = 'O'
+            print(mark + ' ' + guess)
+        else:
+            mark = colors['fail'] + '☒' + colors['close']
+            if is_windows:
+                mark = 'X'
+            print(mark + ' '+ guess)
+        print('---')
+
+    return 1 if guess == correct else 0
+
+
 def normalize(x: np.ndarray) -> np.ndarray:
     """
     Normalizes a given NumPy array.
