@@ -672,6 +672,141 @@ class TimeDropout:
         return dout * self.mask
     
 
+class TimeBiLSTM:
+    """
+    Time Bidirectional LSTM (BiLSTM).
+
+    This layer processes a sequence using two LSTM layers, one for forward pass and 
+    one for backward pass, and then concatenates their outputs. This allows the layer
+    to capture information from both past and future context.
+
+    Attributes:
+        forward_lstm (TimeLSTM): LSTM layer for processing the sequence in forward direction.
+        backward_lstm (TimeLSTM): LSTM layer for processing the sequence in backward direction.
+        params (list): Parameters of both LSTM layers.
+        grads (list): Gradients of both LSTM layers.
+    """
+
+    def __init__(self, Wx1, Wh1, b1, 
+                Wx2, Wh2, b2, stateful=False):
+        """
+        Initializes the Time BiLSTM layer.
+
+        Args:
+            Wx1, Wh1, b1: Parameters for the forward LSTM layer.
+            Wx2, Wh2, b2: Parameters for the backward LSTM layer.
+            stateful (bool): If True, the layer maintains state between batches.
+        """
+        self.forward_lstm = TimeLSTM(Wx1, Wh1, b1, stateful)
+        self.backward_lstm = TimeLSTM(Wx2, Wh2, b2, stateful)
+        self.params = self.forward_lstm.params + self.backward_lstm.params
+        self.grads = self.forward_lstm.grads + self.backward_lstm.grads
+
+    def forward(self, xs: np.ndarray) -> np.ndarray:
+        """
+        Forward pass for the Time BiLSTM layer.
+
+        Args:
+            xs (np.ndarray): Input sequence of word IDs (batch_size, time_steps, input_size).
+
+        Returns:
+            np.ndarray: Output of the BiLSTM layer (batch_size, time_steps, 2*hidden_size).
+        """
+        o1 = self.forward_lstm.forward(xs)
+        o2 = self.backward_lstm.forward(xs[:, ::-1])
+        o2 = o2[:, ::-1]
+
+        out = np.concatenate((o1, o2), axis=2)
+        return out
+    
+    def backward(self, dhs: np.ndarray) -> np.ndarray:
+        """
+        Backward pass for the Time BiLSTM layer.
+
+        Args:
+            dhs (np.ndarray): Gradient from the subsequent layer
+                              (batch_size, time_steps, 2*hidden_Size).
+
+        Returns:
+            np.ndarray: Gradient with respect to the input sequence.
+        """
+        H = dhs.shape[2] // 2
+        do1 = dhs[:, :, :H]
+        do2 = dhs[:, :, H:]
+
+        dxs1 = self.forward_lstm.backward(do1)
+        do2 = do2[:, ::-1]
+        dxs2 = self.backward_lstm.backward(do2)
+        dxs2 = dxs2[:, ::-1]
+        dxs = dxs1 + dxs2
+        return dxs
+
+
+class TimeSigmoidWithLoss:
+    """
+    Time Sigmoid with Loss layer.
+
+    This layer applies a sigmoid activation followd by a loss computation at each time step of a sequence.
+    It is suitable for binary classification tasks in sequence data.
+
+    Attributes:
+        params (list): Parameters of the layer (empty as no parameters are needed for sigmoid and loss).
+        grads (list): Gradients of the layer's parameters (empty as no gradients are computed for sigmoid and loss).
+        xs_shape (tuple): Shape of the input sequence.
+        layers (list): List of SoftmaxWithLoss layers for each time step.
+    """
+
+    def __init__(self):
+        """
+        Initializes the Time Sigmoid with Loss layer.
+        """
+        self.params, self.grads = [], []
+        self.xs_shape = None
+        self.layers = None
+
+    def forward(self, xs: np.ndarray, ts: np.ndarray) -> float:
+        """
+        Forward pass for the Time Sigmoid with Loss layer.
+
+        Args:
+            xs (np.ndarray): Input sequence data (batch_size, time_steps).
+            ts (np.ndarray): Target labels for the sequence (batch_size, time_steps).
+
+        Returns:
+            float: Average loss over all time steps.
+        """
+        N, T = xs.shape
+        self.xs_shape = xs.shape
+
+        self.layers = []
+        loss = 0
+
+        for t in range(T):
+            layer = SigmoidWithLoss()
+            loss += layer.forward(xs[:, t], ts[:, t])
+            self.layers.append(layer)
+
+        return loss / T
+    
+    def backward(self, dout: float=1) -> np.ndarray:
+        """
+        Backward pass for the Time Sigmoid with Loss layer.
+
+        Args:
+            dout (float, optional): Initial gradient for backpropagation. Defaults to 1.
+
+        Returns:
+            np.ndarray: Gradient with respect to the input sequence.
+        """
+        dxs = np.empty(self.xs_shape, dtype='f')
+
+        dout *= 1/T
+        for t in range(T):
+            layer = self.layers[t]
+            dxs[:, t] = layer.backward(dout)
+
+        return dxs
+
 class GRU:
     """
     Gated Recurrent Unit (GRU) layer.
@@ -858,3 +993,69 @@ class TimeGRU:
         Resets the hidden state of the GRU layer.
         """
         self.h = None
+
+
+class Simple_TimeSoftmaxWithLoss:
+    def __init__(self):
+        self.params, self.grads = [], []
+        self.cache = None
+
+    def forward(self, xs, ts):
+        N, T, V = xs.shape
+        layers = []
+        loss = 0
+
+        for t in range(T):
+            layer = SoftmaxWithLoss()
+            loss += layer.forward(xs[:, t, :], ts[:, t])
+            layers.append(layer)
+        loss /= T
+
+        self.cache = (layers, xs)
+        return loss
+    
+    def backward(self, dout=1):
+        layers, xs = self.cache
+        N, T, V = xs.shape
+        dxs = np.empty(xs.shape, dtype='f')
+
+        dout *= 1/T
+        for t in range(T):
+            layer = layers[t]
+            dxs[:, t, :] = layer.backward(dout)
+
+        return dxs
+    
+class Simple_TimeAffine:
+    def __init__(self, W, b):
+        self.W, self.b = W, b
+        self.dW, self.db = None, None
+        self.layers = None
+
+    def forward(self, xs):
+        N, T, D = xs.shape
+        D, M = self.W.shape
+
+        self.layers = []
+        out = np.empty((N, T, M), dtype='f')
+        for t in range(T):
+            layer = Affine(self.W, self.b)
+            out[:, t, :] = layer.forward(xs[:, t, :])
+            self.layers.append(layer)
+
+        return out
+    
+    def backward(self, dout):
+        N, T, M = dout.shape
+        D, M = self.W.shape
+
+        dxs = np.empty((N, T, D), dtype='f')
+        self.dW, self.db = 0, 0
+        for t in range(T):
+            layer = self.layers[t]
+            dxs[:, t, :] = layer.backward(dout[:, t, :])
+
+            self.dW += layer.dW
+            self.db += layer.db
+
+        return dxs

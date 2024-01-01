@@ -96,7 +96,7 @@ class Affine:
         return dx
     
 
-class Sotfmax:
+class Softmax:
     def __init__(self):
         """
         Initializes a Softmax object.
